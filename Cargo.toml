@@ -1,0 +1,11 @@
+[package]
+name = "derivative_pricer"
+version = "0.1.0"
+authors = ["VsevolodRakita"]
+description = "A library providing pricers for various options in a Black-Scholes setting"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+rand="0.8.5"
+rand_distr = "0.4.3"
