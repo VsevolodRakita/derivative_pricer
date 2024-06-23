@@ -66,6 +66,13 @@ pub fn cumulative_normal_function(x: f64) -> f64{
     }
 }
 
+///Calculates the standard normal pdf.
+pub fn normal_probability_density_function(x:f64)->f64{
+    let sqrt_two_pi = (2.0*std::f64::consts::PI).sqrt();
+    let ex = (-0.5*x*x).exp();
+    ex*(1.0/sqrt_two_pi)
+}
+
 ///A tuple like struct for storing non-negative f64s.
 /// 
 /// # Examples

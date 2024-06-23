@@ -68,7 +68,7 @@ pub fn monte_carlo_vanilla_pricer(option: &VanillaOption, underlying: Stock, r: 
     let rng = crate::random_number_generator::RandomNumberGenerator::new(seed, number_of_trials);
     vanilla_monte_carlo_simulation(option,&mut sg, underlying, r, evaluation_time, &rng);
     NonNegativeFloat::from(sg.get_results_so_far()[0][0])
-}
+} 
 
 
 #[cfg(test)]
@@ -132,6 +132,41 @@ mod tests {
         let monte_carlo_prediction = sg.get_results_so_far()[0][0];
         let bs_formula = european_call_option_price(stock,NonNegativeFloat::from(100.0), 0.25,NonNegativeFloat::from(2.0));
         assert!((f64::from(bs_formula) - monte_carlo_prediction).abs()<0.1);
+    }
+
+    #[test]
+    fn vanilla_pricer_test4() {
+        let params = Box::new(vec![123.0]);
+        let ec = VanillaOption::new(Box::new(
+            |s: f64, params: &Box<Vec<f64>>| -> f64 {
+                if s -params[0]> 0.0{
+                    return s -params[0];
+                }
+                0.0
+            }), NonNegativeFloat::from(1.43), params);
+        let mut sg: MeanStatisticsGatherer = MeanStatisticsGatherer::new();
+        let stock = Stock::new(NonNegativeFloat::from(101.2), NonNegativeFloat::from(0.15), NonNegativeFloat::from(0.03));
+        let rng = RandomNumberGenerator::new(None, 10000000);
+        vanilla_monte_carlo_simulation(&ec, &mut sg, stock, 0.07, NonNegativeFloat::from(0.0), &rng);
+        let monte_carlo_prediction = sg.get_results_so_far()[0][0];
+        let bs_formula = european_call_option_price(stock,NonNegativeFloat::from(123.0), 0.07,NonNegativeFloat::from(1.43));
+        assert!((f64::from(bs_formula) - monte_carlo_prediction).abs()<0.1);
+    }
+
+    #[test]
+    fn vanilla_pricer_test5() {
+        let params = Box::new(vec![123.0]);
+        let ec = VanillaOption::new(Box::new(
+            |s: f64, params: &Box<Vec<f64>>| -> f64 {
+                if s -params[0]> 0.0{
+                    return s -params[0];
+                }
+                0.0
+            }), NonNegativeFloat::from(1.43), params);
+        let stock = Stock::new(NonNegativeFloat::from(101.2), NonNegativeFloat::from(0.15), NonNegativeFloat::from(0.03));
+        let monte_carlo_prediction = monte_carlo_vanilla_pricer(&ec, stock, 0.07, NonNegativeFloat::from(0.0), None, 10000000);
+        let bs_formula = european_call_option_price(stock,NonNegativeFloat::from(123.0), 0.07,NonNegativeFloat::from(1.43));
+        assert!((f64::from(bs_formula) - f64::from(monte_carlo_prediction)).abs()<0.1);
     }
 
 }

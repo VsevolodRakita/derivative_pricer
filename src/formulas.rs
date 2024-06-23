@@ -42,3 +42,63 @@ pub fn zero_coupon_bond(r: f64,time_to_maturity: NonNegativeFloat) -> NonNegativ
     let ret = raw_formulas::zero_coupon_bond(r, f64::from(time_to_maturity));
     NonNegativeFloat::from(ret)
 }
+
+pub fn call_delta(stock: Stock, strike:NonNegativeFloat, r: f64, time_to_expiry: NonNegativeFloat) -> NonNegativeFloat{
+    let ret = raw_formulas::call_delta(f64::from(stock.get_price()), 
+        f64::from(strike), r, f64::from(time_to_expiry), f64::from(stock.get_volatility()), f64::from(stock.get_divident_rate()));
+    NonNegativeFloat::from(ret)
+}
+
+pub fn call_gamma(stock: Stock, strike:NonNegativeFloat, r: f64, time_to_expiry: NonNegativeFloat) -> NonNegativeFloat{
+    let ret = raw_formulas::call_gamma(f64::from(stock.get_price()), 
+        f64::from(strike), r, f64::from(time_to_expiry), f64::from(stock.get_volatility()), f64::from(stock.get_divident_rate()));
+    NonNegativeFloat::from(ret)
+}
+
+pub fn call_vega(stock: Stock, strike:NonNegativeFloat, r: f64, time_to_expiry: NonNegativeFloat) -> NonNegativeFloat{
+    let ret = raw_formulas::call_vega(f64::from(stock.get_price()), 
+        f64::from(strike), r, f64::from(time_to_expiry), f64::from(stock.get_volatility()), f64::from(stock.get_divident_rate()));
+    NonNegativeFloat::from(ret)
+}
+
+pub fn call_rho(stock: Stock, strike:NonNegativeFloat, r: f64, time_to_expiry: NonNegativeFloat) -> NonNegativeFloat{
+    let ret = raw_formulas::call_rho(f64::from(stock.get_price()), 
+        f64::from(strike), r, f64::from(time_to_expiry), f64::from(stock.get_volatility()), f64::from(stock.get_divident_rate()));
+    NonNegativeFloat::from(ret)
+}
+
+pub fn call_theta(stock: Stock, strike:NonNegativeFloat, r: f64, time_to_expiry: NonNegativeFloat) -> NonNegativeFloat{
+    let ret = raw_formulas::call_theta(f64::from(stock.get_price()), 
+        f64::from(strike), r, f64::from(time_to_expiry), f64::from(stock.get_volatility()), f64::from(stock.get_divident_rate()));
+    NonNegativeFloat::from(ret)
+}
+
+pub fn put_delta(stock: Stock, strike:NonNegativeFloat, r: f64, time_to_expiry: NonNegativeFloat) -> NonNegativeFloat{
+    let ret = raw_formulas::put_delta(f64::from(stock.get_price()), 
+        f64::from(strike), r, f64::from(time_to_expiry), f64::from(stock.get_volatility()), f64::from(stock.get_divident_rate()));
+    NonNegativeFloat::from(ret)
+}
+
+pub fn put_gamma(stock: Stock, strike:NonNegativeFloat, r: f64, time_to_expiry: NonNegativeFloat) -> NonNegativeFloat{
+    let ret = raw_formulas::put_gamma(f64::from(stock.get_price()), 
+        f64::from(strike), r, f64::from(time_to_expiry), f64::from(stock.get_volatility()), f64::from(stock.get_divident_rate()));
+    NonNegativeFloat::from(ret)
+}
+
+pub fn put_vega(stock: Stock, strike:NonNegativeFloat, r: f64, time_to_expiry: NonNegativeFloat) -> NonNegativeFloat{
+    let ret = raw_formulas::put_vega(f64::from(stock.get_price()), 
+        f64::from(strike), r, f64::from(time_to_expiry), f64::from(stock.get_volatility()), f64::from(stock.get_divident_rate()));
+    NonNegativeFloat::from(ret)
+}
+
+pub fn put_rho(stock: Stock, strike:NonNegativeFloat, r: f64, time_to_expiry: NonNegativeFloat) -> NonNegativeFloat{
+    let ret = raw_formulas::put_rho(f64::from(stock.get_price()), 
+        f64::from(strike), r, f64::from(time_to_expiry), f64::from(stock.get_volatility()), f64::from(stock.get_divident_rate()));
+    NonNegativeFloat::from(ret)
+}
+
+pub fn put_theta(stock: Stock, strike:NonNegativeFloat, r: f64, time_to_expiry: NonNegativeFloat) -> NonNegativeFloat{
+    let ret = raw_formulas::put_theta(f64::from(stock.get_price()), 
+        f64::from(strike), r, f64::from(time_to_expiry), f64::from(stock.get_volatility()), f64::from(stock.get_divident_rate()));
+    NonNegativeFloat::from(ret)
+}
