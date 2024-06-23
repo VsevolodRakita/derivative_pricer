@@ -1,6 +1,6 @@
-//! Provides Black-Scholes formulas for various securities, with inputs being f64.
+//! Provides Black-Scholes formulas for various securities and greeks, with inputs being f64.
 //! Provides Black-Scholes formulas for european call and put options, digital call and put options,
-//! forward prices and zero coupon bonds.
+//! forward prices, zero coupon bonds, and the greeks of put and call options.
 //! 
 //! The formulas in this module do not use the custom types `NonNegativeFloat` and `Stock`, so they can be used more
 //! easily outside the library.
