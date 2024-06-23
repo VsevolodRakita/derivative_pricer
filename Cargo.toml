@@ -1,6 +1,6 @@
 [package]
 name = "derivative_pricer"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["VsevolodRakita"]
 description = "A library providing pricers for various options in a Black-Scholes setting"
 edition = "2021"
