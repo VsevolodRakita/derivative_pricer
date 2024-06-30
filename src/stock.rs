@@ -37,11 +37,11 @@ impl Stock {
     
 
     ///Evolves the stocks price according to geometrical Brownian motion. gaussian_sample is a sample from astandard Gauusian distribution,
-    /// r is the short rate of interest and time is the time.
-    pub fn evolve(&mut self, gaussian_sample: f64, r: f64, time: NonNegativeFloat){
-        let root_of_time = f64::from(time).sqrt();
+    /// r is the short rate of interest and time_step is the time step.
+    pub fn evolve(&mut self, gaussian_sample: f64, r: f64, time_step: NonNegativeFloat){
+        let root_of_time = f64::from(time_step).sqrt();
         let half_sigma_squared = 0.5*f64::from(self.volatility)*f64::from(self.volatility);
-        let exponent = (r-f64::from(self.divident_rate)-half_sigma_squared)*f64::from(time)+gaussian_sample*root_of_time*f64::from(self.volatility);
+        let exponent = (r-f64::from(self.divident_rate)-half_sigma_squared)*f64::from(time_step)+gaussian_sample*root_of_time*f64::from(self.volatility);
         let moved_spot=f64::from(self.price)*exponent.exp();
         self.price = NonNegativeFloat::from(moved_spot);
     }
