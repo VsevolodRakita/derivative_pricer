@@ -1,6 +1,6 @@
 //! Provides various utilities.
 
-use std::f64::consts::PI;
+use std::{cmp::Ordering, f64::consts::PI};
 
 
 ///Calculates the inverse cumulative normal function of `x`. `x` must be between 0 and 1, otherwise behaviour is undefined.
@@ -96,6 +96,23 @@ impl std::cmp::PartialEq for NonNegativeFloat {
     }
 }
 
+impl Ord for NonNegativeFloat {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let x = f64::from(*self);
+        let y = f64::from(*other);
+        if f64::abs(x-y)<1e-10{
+            return Ordering::Equal;
+        }
+        if x < y{
+            return Ordering::Less;
+        }
+        assert!(y < x);
+        Ordering::Greater
+    }
+}
+
+impl Eq for NonNegativeFloat{ }
+
 impl From<f64> for NonNegativeFloat {
     ///Creates a new NonNegativeFloat from an f64.
     /// 
@@ -121,6 +138,8 @@ impl std::convert::From<NonNegativeFloat> for f64{
         value.0
     }
 }
+
+pub type TimeStamp = NonNegativeFloat;
 
 #[cfg(test)]
 mod tests {
@@ -153,5 +172,11 @@ mod tests {
     fn non_negative_float_test3(){
         let nnf = NonNegativeFloat::from(0.0);
         assert_eq!(0.0, f64::from(nnf));
+    }
+
+    #[test]
+    #[should_panic]
+    fn non_negative_float_test4(){
+        let _nnf = NonNegativeFloat::from(f64::NAN);
     }
 }

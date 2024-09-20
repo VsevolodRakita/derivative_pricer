@@ -71,8 +71,8 @@ mod tests {
     fn stats_gatherer_test3(){
         let mut sg = MeanStatisticsGatherer::new();
         let dim =50000000;
-        let rng = RandomNumberGenerator::new(None, dim);
-        let gus = rng.get_gaussians();
+        let mut rng = RandomNumberGenerator::new(None);
+        let gus = rng.get_gaussians(dim);
         for g in gus{
             sg.dump_one_result(g);
         }

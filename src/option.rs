@@ -1,238 +1,201 @@
 //! Provides struct representing derivative options.
-//! Currently only vanilla options are implemented.
 
-use crate::utils::NonNegativeFloat;
+use crate::stock::{GeometricBrownianMotionStock, StockState};
+use crate::utils::{NonNegativeFloat, TimeStamp};
+use std::rc::Rc;
 
-/// A trait indicating that the class implementing it is an option that can be priced (I would prefer to call this trait 
-/// option, but in rust this is already used for something else). The method payoff gets a pth of the underlying asset
-/// and returns the payoff of the option at the time of exercise.
-pub trait OptionDerivative{
-    // Required method
-    fn payoff(&self, path: &Vec<f64>) ->f64;
+
+/// A trait indicating that the implementing struct is a state of the underlying of some option.
+/// For example, this can be the value of a stock at a certain timestamp, or the temprature at a
+/// certain location at a certain timestamp.
+pub trait Underlying{
+
+}
+
+impl Underlying for GeometricBrownianMotionStock {
+    
+}
+
+/// A trait indicating that the class implementing it is an option that can be priced
+pub trait DerivativeOption<T: Underlying> {
+    /// Returns the time to expiry of the option, or None if the option expired.
+    fn get_time_to_expiry(&self)->Option<TimeStamp>;
+    /// Returns the number of random samples needed to price one path of the option.
+    fn get_dimensionality(&self)->usize;
+    /// Prices the option (not discounted) given one path of the underlying.
+    /// #Parameters
+    /// - `random_samples` - a vector of iid random samples of length `self.get_dimensionality()` from whatever distribution the option needs.
+    /// - `r` - the short rate of interest.
+    fn price_path(&self, random_samples: &Vec<f64>,r: f64)->f64;
 }
 
 /// A struct implementing a vanilla option, i.e. an option whose payoff only depends on the value of the underlying
 /// asset at exercise time.
-pub struct VanillaOption{
+pub struct VanillaStockOption{
+    ///A shared reference to the underlying stock.
+    underlying_stock: Rc<GeometricBrownianMotionStock>,
+    /// The time of expiry.
+    expiry: TimeStamp,
     /// The payoff function of the option. Gets the value of the underlying asset at exercise time and a boxed vector of
     /// parameters such as strike price.
-    payoff_function: Box<dyn Fn(f64,&Box<Vec<f64>>)->f64>,
-    /// The time of expiry.
-    expiry: NonNegativeFloat,
+    payoff_function: Box<dyn Fn(NonNegativeFloat, &Box<Vec<f64>>)->f64>,
     /// A boxed vector of whatever parameters are needed to compute the payoff function, e.g. strike price.
     params: Box<Vec<f64>>,
 }
 
-impl VanillaOption {
+impl VanillaStockOption {
     /// Returns a new vanilla option.
-    pub fn new(payoff_function: Box<dyn Fn(f64, &Box<Vec<f64>>)->f64>, expiry: NonNegativeFloat, params: Box<Vec<f64>>) -> VanillaOption {
-        VanillaOption{
-            payoff_function,
+    /// # Parameters
+    /// - `underlying_stock`: A shared reference to the underlying stock.
+    /// - `expiry`: The expiry time.
+    /// - `payoff_function`: A boxed payoff function. The function gets the value of the underlying asset at exercise time and a boxed vector of parameters such as strike price.
+    /// - `params`: A boxed vector of parameters, for the payoff function.
+    pub fn new(underlying_stock: &Rc<GeometricBrownianMotionStock>, expiry:TimeStamp, payoff_function: Box<dyn Fn(NonNegativeFloat, &Box<Vec<f64>>)->f64>, params: Box<Vec<f64>>)->VanillaStockOption{
+        VanillaStockOption{
+            underlying_stock: Rc::clone(&underlying_stock),
             expiry,
+            payoff_function,
             params,
         }
+
     }
 
     /// Returns the expiry of the option.
-    pub fn get_expiry(&self) -> NonNegativeFloat{
+    pub fn get_expiry(&self) -> TimeStamp{
         self.expiry
     }
-}
 
-impl OptionDerivative for VanillaOption{
-    /// Computes the payoff of the function. Since this is a vanilla option, the only information requiered from the path is the last
-    /// value, i.e. the value of the underlying at time of exercise.
-    fn payoff(&self, path: &Vec<f64>) ->f64{
-        (*self.payoff_function)(path[path.len()-1], &(self.params))
+    /// Returns the underlying stock of the option.
+    pub fn get_underlying(&self) -> Rc<GeometricBrownianMotionStock>{
+        self.underlying_stock.clone()
     }
 }
 
+impl DerivativeOption<GeometricBrownianMotionStock> for VanillaStockOption {
+    ///Returns the time to expiry of the option, where the current time is considered to be the current time of the underlying stock.
+    fn get_time_to_expiry(&self)->Option<TimeStamp> {
+        let x=f64::from(self.expiry)-f64::from(self.underlying_stock.get_current_state().get_time());
+        if x<0.0{
+            return None;
+        }
+        Some(NonNegativeFloat::from(x))
+    }
+    
+    /// Returns the number of random samples needed to price one path of the option.
+    fn get_dimensionality(&self)->usize {
+        1
+    }
+    
+    /// Prices the option (not discounted) given one path of the underlying.
+    /// #Parameters
+    /// - `random_samples` - a vector with (at least...) one Gaussian sample.
+    /// - `r` - the short rate of interest.
+    fn price_path(&self, random_samples: &Vec<f64>, r: f64)->f64 {
+        if random_samples.len()< 1{
+            panic!("Incorrect length of random_samples");
+        }
+        if self.expiry < self.underlying_stock.get_current_state().get_time(){
+            panic!("The option expiered!")
+        }
+        let time_stamps=vec![self.expiry];
+        let state=self.underlying_stock.generate_risk_neutral_path_from_time_stamps(random_samples, &time_stamps, r);
+        (self.payoff_function)(state[0].get_value(), &self.params)
+    }
+    
+}
 
 pub struct AsianOption{
-    /// The payoff function of the option. Gets a vector of the values of the underlying asset at monitoring times (this vector should be of the same 
-    /// size as `monitoring_times`) and a boxed vector of parameters such as strike price.
-    payoff_function: Box<dyn Fn(&Vec<f64>,&Box<Vec<f64>>)->f64>,
+    ///A shared reference to the underlying stock.
+    underlying_stock: Rc<GeometricBrownianMotionStock>,
     /// The time of expiry.
-    expiry: NonNegativeFloat,
+    expiry: TimeStamp,
+    /// A vector of the times at which the value of the underlying stock will be used for the average.
+    monitoring_times: Vec<TimeStamp>,
+    /// A vector of states of the underlying stock.
+    history: Vec<StockState>,
+    /// A boxed function that gets a vector of states of the underlying stock and a vector of monitoring times, and computes an average.
+    average_function: Box<dyn Fn(&Vec<StockState>, &Vec<TimeStamp>)->NonNegativeFloat>,
+    /// A boxed function that gets the average of the underlying stock, as computed by `self.average_function` and a boxed vector of parameters, and evaluates the payoff of the option.
+    payoff_function: Box<dyn Fn(NonNegativeFloat, &Box<Vec<f64>>)->f64>,
     /// A boxed vector of whatever parameters are needed to compute the payoff function, e.g. strike price.
     params: Box<Vec<f64>>,
-    /// A boxed vector of the times at which the underlying asset will be monitored. Must be monotone increasing, 
-    /// with the final value smaller or equal to `expiry`.
-    monitoring_times: Box<Vec<NonNegativeFloat>>,
+    
 }
 
 
-impl AsianOption {
-    /// Returns a new asian option.
-    pub fn new(payoff_function: Box<dyn Fn(&Vec<f64>,&Box<Vec<f64>>)->f64>, expiry: NonNegativeFloat, params: Box<Vec<f64>>, 
-        monitoring_times: Box<Vec<NonNegativeFloat>>) -> AsianOption {
-        AsianOption{
-            payoff_function,
-            expiry,
-            params,
-            monitoring_times,
+impl AsianOption{
+    /// Returnes a new Asian option.
+    /// # Parameters:
+    /// - `underlying_stock`: A shared reference to the underlying stock.
+    /// - `expiry`: The expiry time.
+    /// - `monitoring_times`: A vector of the times at which the value of the underlying stock will be used for the average. Needs to be sorted with unique values. 
+    /// - `average_function`: A boxed function that gets a vector of states of the underlying stock and a vector of monitoring times, and computes an average.
+    /// - `payoff_function`: A boxed payoff function. The function gets the value of the underlying asset at exercise time and a boxed vector of parameters such as strike price.
+    /// - `params`: A boxed vector of parameters, for the payoff function.
+    pub fn new(underlying_stock: &Rc<GeometricBrownianMotionStock>, expiry: TimeStamp, monitoring_times: &Vec<TimeStamp>, average_function: Box<dyn Fn(&Vec<StockState>, &Vec<TimeStamp>)->NonNegativeFloat>,
+        payoff_function: Box<dyn Fn(NonNegativeFloat, &Box<Vec<f64>>)->f64>, params: Box<Vec<f64>>,)->AsianOption{
+            AsianOption{
+                underlying_stock: underlying_stock.clone(),
+                expiry,
+                monitoring_times: monitoring_times.clone(),
+                history: vec![underlying_stock.get_current_state()],
+                average_function,
+                payoff_function,
+                params,
+            }
         }
-    }
-    /// Creates a new asian option. The monitoring times will start with `start_time` and increase by `step` until `expiry`. If
-    /// `include_expiry` is true, the last element of `monitoring_times` will be equal to `expiry`, otherwise it will be strictly
-    /// smaller. If `start_time`>`expiry`, `monitoring_times` will be empty.
-    /// # Panics
-    /// Panics if `step`=0
-    pub fn new_from_time_step(payoff_function: Box<dyn Fn(&Vec<f64>,&Box<Vec<f64>>)->f64>, expiry: NonNegativeFloat, params: Box<Vec<f64>>, 
-    start_time: NonNegativeFloat, step: NonNegativeFloat, include_expiry: bool) -> AsianOption {
-        let mut v = Vec::new();
-        let mut t = f64::from(start_time);
-        let dt = f64::from(step);
-        if dt==0.0{
-            panic!("Step can not be 0.");
+    
+    /// Updates the option with the current state of the underlying stock.
+    pub  fn update(&mut self){
+        if self.history[self.history.len()-1].get_time() == self.underlying_stock.get_current_state().get_time() {
+            return;
         }
-        while t < f64::from(expiry){
-            v.push(NonNegativeFloat::from(t));
-            t+=dt
-        }
-        if include_expiry && start_time < expiry{
-            v.push(expiry);
-        }
-        AsianOption{
-            payoff_function,
-            expiry,
-            params,
-            monitoring_times : Box::new(v),
-        }
-    }
-
-    /// Returns the expiry of the option.
-    pub fn get_expiry(&self) -> NonNegativeFloat{
-        self.expiry
-    }
-
-    /// Returns the expiry of the option.
-    pub fn get_monitoring_times(&self) -> Vec<NonNegativeFloat>{
-        *self.monitoring_times.clone()
+        self.history.push(self.underlying_stock.get_current_state());
     }
 }
 
-impl OptionDerivative for AsianOption {
-    fn payoff(&self, path: &Vec<f64>) ->f64 {
-        (*self.payoff_function)(path, &self.params)
-    }
-}
-
-
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn euro_call(){
-        let params = Box::new(vec![5.0]);
-        let ec = VanillaOption::new(Box::new(
-            |s: f64, params: &Box<Vec<f64>>| -> f64 {
-                if s -params[0]> 0.0{
-                    return s -params[0];
-                }
-                0.0
-            }), NonNegativeFloat::from(7.4), params);
-        let path = vec![8.9];
-        assert_eq!(8.9-5.0, ec.payoff(&path));
-    }
-
-    #[test]
-    fn euro_call2(){
-        let params = Box::new(vec![6.7]);
-        let ec = VanillaOption::new(Box::new(
-            |s: f64, params: &Box<Vec<f64>>| -> f64 {
-                if s -params[0]> 0.0{
-                    return s -params[0];
-                }
-                0.0
-            }), NonNegativeFloat::from(7.4), params);
-        let path = vec![5.23];
-        assert_eq!(0.0, ec.payoff(&path));
-    }
-
-    #[test]
-    fn euro_call3(){
-        let params = Box::new(vec![6.7]);
-        let ec = VanillaOption::new(Box::new(
-            |s: f64, params: &Box<Vec<f64>>| -> f64 {
-                if s -params[0]> 0.0{
-                    return s -params[0];
-                }
-                0.0
-            }), NonNegativeFloat::from(7.4), params);
-        assert_eq!(7.4, f64::from(ec.get_expiry()));
-    }
-
-    #[test]
-    fn asian_call(){
-        let params = Box::new(vec![10.0]);
-        let ac = AsianOption::new_from_time_step(Box::new(
-            |s: &Vec<f64>, params: &Box<Vec<f64>>| -> f64 {
-                let m = s.len();
-                let x = (s.iter().sum::<f64>())/(m as f64);
-                if x -params[0]> 0.0{
-                    return x - params[0];
-                }
-                0.0
-            }), NonNegativeFloat::from(10.0), params, NonNegativeFloat::from(0.0), 
-                NonNegativeFloat::from(1.0),true);
-        assert_eq!(10.0, f64::from(ac.get_expiry()));
-    }
-
-    #[test]
-    fn asian_call2(){
-        let params = Box::new(vec![10.0]);
-        let ac = AsianOption::new_from_time_step(Box::new(
-            |s: &Vec<f64>, params: &Box<Vec<f64>>| -> f64 {
-                let m = s.len();
-                let x = (s.iter().sum::<f64>())/(m as f64);
-                if x -params[0]> 0.0{
-                    return x - params[0];
-                }
-                0.0
-            }), NonNegativeFloat::from(10.5), params, NonNegativeFloat::from(0.0), 
-                NonNegativeFloat::from(1.0),true);
-        for i in 0..11{
-            assert_eq!(i as f64, f64::from(ac.get_monitoring_times()[i as usize]));
+impl DerivativeOption<GeometricBrownianMotionStock> for AsianOption {
+    /// Returns the time to expiry of the option, or None if the option expiered.
+    fn get_time_to_expiry(&self)->Option<TimeStamp> {
+        let x=f64::from(self.expiry)-f64::from(self.underlying_stock.get_current_state().get_time());
+        if x<0.0{
+            return None;
         }
-        assert_eq!(10.5, f64::from(ac.get_monitoring_times()[11]));
+        Some(NonNegativeFloat::from(x))
     }
-
-    #[test]
-    fn asian_call3(){
-        let params = Box::new(vec![10.0]);
-        let ac = AsianOption::new_from_time_step(Box::new(
-            |s: &Vec<f64>, params: &Box<Vec<f64>>| -> f64 {
-                let m = s.len();
-                let x = (s.iter().sum::<f64>())/(m as f64);
-                if x -params[0]> 0.0{
-                    return x - params[0];
-                }
-                0.0
-            }), NonNegativeFloat::from(3.0), params, NonNegativeFloat::from(0.0), 
-                NonNegativeFloat::from(1.0),true);
-        let path = vec![8.0,10.0,12.0,9.0];
-        assert_eq!(0.0, ac.payoff(&path));
+    
+    /// Returns the number of random samples needed to price one path of the option.
+    fn get_dimensionality(&self)->usize {
+        let mut i=0;
+        let current_time = self.underlying_stock.get_current_state().get_time();
+        while i<self.monitoring_times.len() && self.monitoring_times[i]< current_time{
+            i+=1;
+        }
+        self.monitoring_times.len()-i
     }
-    #[test]
-    fn asian_call4(){
-        let params = Box::new(vec![10.0]);
-        let ac = AsianOption::new_from_time_step(Box::new(
-            |s: &Vec<f64>, params: &Box<Vec<f64>>| -> f64 {
-                let m = s.len();
-                let x = (s.iter().sum::<f64>())/(m as f64);
-                if x -params[0]> 0.0{
-                    return x - params[0];
-                }
-                0.0
-            }), NonNegativeFloat::from(3.0), params, NonNegativeFloat::from(0.0), 
-                NonNegativeFloat::from(1.0),true);
-        let path = vec![12.0,14.0,16.0,18.0];
-        assert_eq!(5.0, ac.payoff(&path));
+    
+    /// Prices the option (not discounted) given one path of the underlying.
+    /// #Parameters
+    /// - `random_samples` - a vector of iid random samples of length `self.get_dimensionality()` from whatever distribution the option needs.
+    /// - `r` - the short rate of interest.
+    fn price_path(&self, random_samples: &Vec<f64>, r: f64) ->f64{
+        let mut history = self.history.clone();
+        if self.underlying_stock.get_current_state().get_time()!=history[history.len()-1].get_time(){
+            history.push(self.underlying_stock.get_current_state());
+        }
+        let t0=history[history.len()-1].get_time();
+        let mut time_stamps=Vec::new();
+        for t in self.monitoring_times.iter(){
+            if *t>t0{
+                time_stamps.push(*t);
+            }
+        }
+        let mut v=self.underlying_stock.generate_risk_neutral_path_from_time_stamps(random_samples, &time_stamps, r);
+        history.append(&mut v);
+        (*self.payoff_function)((*self.average_function)(&history, &self.monitoring_times), &self.params)
     }
-
-
+    
 
 }
+
+

@@ -1,172 +1,202 @@
 //! Provides Monte Carlo pricers for various types of derivative options.
 //! Currently implements a Monte Carlo pricer only for vanilla options
 
-
-use crate::random_number_generator::RandomNumberGeneratorTrait;
-use crate::option::{OptionDerivative, VanillaOption};
+/* 
+use crate::random_number_generator::{RandomNumberGenerator, RandomNumberGeneratorTrait};
+use crate::option::{AsianOption, OptionDerivative, UnderlyingState, VanillaOption};
 use crate::statistics_gatherer::StatisticsGathererTrait;
-use crate::utils::NonNegativeFloat;
+use crate::utils::{NonNegativeFloat, TimeStamp};
 use crate::stock::Stock;
+*/
 
+use crate::option::{DerivativeOption, Underlying};
+use crate::random_number_generator::RandomNumberGeneratorTrait;
+use crate::statistics_gatherer::StatisticsGathererTrait;
 
-/// A Monte Carlo Simulator for vanilla options.
+/// A Monte Carlo Simulator.
 /// 
 /// # Parameters
 /// 
-/// - `option` - A VanillaOption, defined in the `option` module.
+/// - `option` - A `DerivativeOption`, as defined in the `option` module.
 /// - `gatherer` - A mutable object implementing the `StatisticsGathererTrait` trait described in the `statistics_gatherer` module.
 ///     This will be used to output the results of the Monte Carlo simulation.
-/// - `underlying` - the underlying stock of the option.
 /// - `r` - the short rate of interest.
-/// - `evaluation_time` - the time at which the option is priced. The time to maturity of the option is `option.expiry - evaluation_time`. If this value
-///     is negative, the function will panic (as the option already expiered).
 /// - `rng` - an object implementing the `RandomNumberGeneratorTrait`, such as `RandomNumberGenerator`. Both are descrived in the `random-number_generator` module.
-///     Note the number of trials in the simulation is determined by `rng.get_dimensionality()`.
+/// - `number_of_paths` - The number of trials in the simulation.
 /// 
 /// # Panics
 /// 
 /// The function panics if `option.expiry - evaluation_time` is negative.
-pub fn vanilla_monte_carlo_simulation( option: &VanillaOption, gatherer: &mut impl StatisticsGathererTrait,
-        underlying: Stock, r: f64, evaluation_time: NonNegativeFloat, rng: &impl RandomNumberGeneratorTrait){
-    let tau = f64::from(option.get_expiry())-f64::from(evaluation_time);
-    if tau<0.0{
-        panic!("The option expiered!")
+pub fn monte_carlo_simulation<T>(option: &impl DerivativeOption<T>, gatherer: &mut impl StatisticsGathererTrait, r: f64, rng: &mut impl RandomNumberGeneratorTrait, 
+    number_of_paths: usize)
+where T: Underlying{
+    let tau= option.get_time_to_expiry().expect("The option expiered!");
+    let discount_factor = f64::exp(-r*f64::from(tau));
+    for _ in 0..number_of_paths{
+        gatherer.dump_one_result(discount_factor*option.price_path(&rng.get_gaussians(option.get_dimensionality()), r));
     }
-    //let rng = random_number_generator::RandomNumberGenerator::new(random_seed, number_of_paths);
-    let gaussians=rng.get_gaussians();
-    let discount_factor = (-r*tau).exp();
-    
-    for gaussian in gaussians{
-        let mut underlying2=underlying.clone();
-        underlying2.evolve(gaussian, r, NonNegativeFloat::from(tau));
-        let path = vec![f64::from(underlying2.get_price())];
-        let payoff = option.payoff(&path);
-        gatherer.dump_one_result(discount_factor*payoff);
-    }
-
 }
 
-/// A function that returnes the value of the given vanilla option.
-/// A wraper function for `vanilla_monte_carlo_simulation` that does not require creating a statistics gatherer and random number generator.
+/// A function that returnes the value of the given option.
+/// A wraper function for `monte_carlo_simulation` that does not require creating a statistics gatherer and random number generator.
 /// 
 /// # Parameters
 /// 
-/// - `option` - A VanillaOption, defined in the `option` module.
-/// - `underlying` - the underlying stock of the option.
+/// - `option` - A `DerivativeOption`, as defined in the `option` module.
 /// - `r` - the short rate of interest.
-/// - `evaluation_time` - the time at which the option is priced. The time to maturity of the option is `option.expiry - evaluation_time`. If this value
-///     is negative, the function will panic (as the option already expiered).
-/// - `seed` -an optional seed for the random numbers in the simulation. If `None` a random seed will be used.
-/// - `number_of_trials` - the number of trials for the simulation.
-/// 
-/// # Panics
-/// 
-/// The function panics if `option.expiry - evaluation_time` is negative.
-pub fn monte_carlo_vanilla_pricer(option: &VanillaOption, underlying: Stock, r: f64, 
-        evaluation_time: NonNegativeFloat, seed: Option<u64>, number_of_trials: usize)->NonNegativeFloat{
+/// - `seed` - An optional seed for the random number generation. If `None`, a random seed will be used.
+/// - `number_of_paths` - The number of trials in the simulation.
+pub fn monte_carlo_pricer<T>(option: &impl DerivativeOption<T>, r: f64, seed: Option<u64>, number_of_paths: usize)->f64
+where T: Underlying{
     let mut sg = crate::statistics_gatherer::MeanStatisticsGatherer::new();
-    let rng = crate::random_number_generator::RandomNumberGenerator::new(seed, number_of_trials);
-    vanilla_monte_carlo_simulation(option,&mut sg, underlying, r, evaluation_time, &rng);
-    NonNegativeFloat::from(sg.get_results_so_far()[0][0])
-} 
-
-
+    let mut rng = crate::random_number_generator::RandomNumberGenerator::new(seed);
+    monte_carlo_simulation(option, &mut sg, r, &mut rng, number_of_paths);
+    sg.get_results_so_far()[0][0]
+}
+ 
 #[cfg(test)]
 mod tests {
-    use crate::random_number_generator::RandomNumberGenerator;
-    use crate::statistics_gatherer::MeanStatisticsGatherer;
-    use crate::formulas::european_call_option_price;
+    use std::rc::Rc;
+
+    use crate::option::{AsianOption, VanillaStockOption};
+    use crate::stock::{GeometricBrownianMotionStock, StockState};
+    use crate::utils::{NonNegativeFloat, TimeStamp};
 
     use super::*;
 
     #[test]
-    fn vanilla_pricer_test1() {
+    fn vanilla_call_test1() {
+        let stock = GeometricBrownianMotionStock::new(NonNegativeFloat::from(3.2), TimeStamp::from(0.0), 
+            1.0, NonNegativeFloat::from(0.2), NonNegativeFloat::from(0.0));
         let params = Box::new(vec![5.0]);
-        let ec = VanillaOption::new(Box::new(
-            |s: f64, params: &Box<Vec<f64>>| -> f64 {
-                if s -params[0]> 0.0{
-                    return s -params[0];
-                }
-                0.0
-            }), NonNegativeFloat::from(7.4), params);
-        let stock = Stock::new(NonNegativeFloat::from(0.0), NonNegativeFloat::from(0.0), NonNegativeFloat::from(0.0));
-        let mut sg = MeanStatisticsGatherer::new();
-        let rng = RandomNumberGenerator::new(None, 50);
-        vanilla_monte_carlo_simulation(&ec, &mut sg, stock, 4.2, NonNegativeFloat::from(0.0), &rng);
-        assert_eq!(0.0, sg.get_results_so_far()[0][0]);
+        fn payoff(spot: NonNegativeFloat, params: &Box<Vec<f64>>)->f64{
+            f64::max(f64::from(spot)-params[0], 0.0)
+        }
+
+        let opt = VanillaStockOption::new(&Rc::new(stock), TimeStamp::from(3.7), Box::new(payoff), params);
+        assert!(f64::abs(monte_carlo_pricer(&opt, 0.05, None, 100000)-0.2)<0.01)
+        
     }
 
     #[test]
-    fn vanilla_pricer_test2() {
-        let params = Box::new(vec![100.0]);
-        let ec = VanillaOption::new(Box::new(
-            |s: f64, params: &Box<Vec<f64>>| -> f64 {
-                if s -params[0]> 0.0{
-                    return s -params[0];
-                }
-                0.0
-            }), NonNegativeFloat::from(1.0), params);
-        let mut sg: MeanStatisticsGatherer = MeanStatisticsGatherer::new();
-        let stock = Stock::new(NonNegativeFloat::from(100.0), NonNegativeFloat::from(0.2), NonNegativeFloat::from(0.0));
-        let rng = RandomNumberGenerator::new(None, 10000000);
-        vanilla_monte_carlo_simulation(&ec, &mut sg, stock, 0.05, NonNegativeFloat::from(0.0), &rng);
-        let monte_carlo_prediction: f64 = sg.get_results_so_far()[0][0];
-        let bs_formula = european_call_option_price(stock, NonNegativeFloat::from(100.0),0.05,NonNegativeFloat::from(1.0));
-        assert!((f64::from(bs_formula) - monte_carlo_prediction).abs()<0.1);
+    fn vanilla_call_test2() {
+        let stock = GeometricBrownianMotionStock::new(NonNegativeFloat::from(3.2), TimeStamp::from(0.0), 
+            1.0, NonNegativeFloat::from(0.2), NonNegativeFloat::from(0.0));
+        let params = Box::new(vec![10.0]);
+        fn payoff(spot: NonNegativeFloat, params: &Box<Vec<f64>>)->f64{
+            f64::max(f64::from(spot)-params[0], 0.0)
+        }
+
+        let opt = VanillaStockOption::new(&Rc::new(stock), TimeStamp::from(3.7), Box::new(payoff), params);
+        assert!(f64::abs(monte_carlo_pricer(&opt, 0.05, None, 100000)-0.0)<0.01)
+        
     }
 
     #[test]
-    fn vanilla_pricer_test3() {
-        let params = Box::new(vec![100.0]);
-        let ec = VanillaOption::new(Box::new(
-            |s: f64, params: &Box<Vec<f64>>| -> f64 {
-                if s -params[0]> 0.0{
-                    return s -params[0];
-                }
-                0.0
-            }), NonNegativeFloat::from(2.0), params);
-        let mut sg: MeanStatisticsGatherer = MeanStatisticsGatherer::new();
-        let stock = Stock::new(NonNegativeFloat::from(150.0), NonNegativeFloat::from(0.4), NonNegativeFloat::from(0.1));
-        let rng = RandomNumberGenerator::new(None, 10000000);
-        vanilla_monte_carlo_simulation(&ec, &mut sg, stock, 0.25, NonNegativeFloat::from(0.0), &rng);
-        let monte_carlo_prediction = sg.get_results_so_far()[0][0];
-        let bs_formula = european_call_option_price(stock,NonNegativeFloat::from(100.0), 0.25,NonNegativeFloat::from(2.0));
-        assert!((f64::from(bs_formula) - monte_carlo_prediction).abs()<0.1);
+    fn vanilla_put_test1() {
+        let stock = GeometricBrownianMotionStock::new(NonNegativeFloat::from(3.2), TimeStamp::from(0.0), 
+            1.0, NonNegativeFloat::from(0.2), NonNegativeFloat::from(0.0));
+        let params = Box::new(vec![5.0]);
+        fn payoff(spot: NonNegativeFloat, params: &Box<Vec<f64>>)->f64{
+            f64::max(params[0]-f64::from(spot), 0.0)
+        }
+
+        let opt = VanillaStockOption::new(&Rc::new(stock), TimeStamp::from(3.7), Box::new(payoff), params);
+        assert!(f64::abs(monte_carlo_pricer(&opt, 0.05, None, 100000)-1.16)<0.01)
+        
     }
 
     #[test]
-    fn vanilla_pricer_test4() {
-        let params = Box::new(vec![123.0]);
-        let ec = VanillaOption::new(Box::new(
-            |s: f64, params: &Box<Vec<f64>>| -> f64 {
-                if s -params[0]> 0.0{
-                    return s -params[0];
-                }
-                0.0
-            }), NonNegativeFloat::from(1.43), params);
-        let mut sg: MeanStatisticsGatherer = MeanStatisticsGatherer::new();
-        let stock = Stock::new(NonNegativeFloat::from(101.2), NonNegativeFloat::from(0.15), NonNegativeFloat::from(0.03));
-        let rng = RandomNumberGenerator::new(None, 10000000);
-        vanilla_monte_carlo_simulation(&ec, &mut sg, stock, 0.07, NonNegativeFloat::from(0.0), &rng);
-        let monte_carlo_prediction = sg.get_results_so_far()[0][0];
-        let bs_formula = european_call_option_price(stock,NonNegativeFloat::from(123.0), 0.07,NonNegativeFloat::from(1.43));
-        assert!((f64::from(bs_formula) - monte_carlo_prediction).abs()<0.1);
+    fn vanilla_put_test2() {
+        let stock = GeometricBrownianMotionStock::new(NonNegativeFloat::from(3.2), TimeStamp::from(0.0), 
+            1.0, NonNegativeFloat::from(0.2), NonNegativeFloat::from(0.0));
+        let params = Box::new(vec![10.0]);
+        fn payoff(spot: NonNegativeFloat, params: &Box<Vec<f64>>)->f64{
+            f64::max(params[0]-f64::from(spot), 0.0)
+        }
+
+        let opt = VanillaStockOption::new(&Rc::new(stock), TimeStamp::from(3.7), Box::new(payoff), params);
+        assert!(f64::abs(monte_carlo_pricer(&opt, 0.05, None, 100000)-5.12)<0.01)
+        
     }
 
     #[test]
-    fn vanilla_pricer_test5() {
-        let params = Box::new(vec![123.0]);
-        let ec = VanillaOption::new(Box::new(
-            |s: f64, params: &Box<Vec<f64>>| -> f64 {
-                if s -params[0]> 0.0{
-                    return s -params[0];
-                }
-                0.0
-            }), NonNegativeFloat::from(1.43), params);
-        let stock = Stock::new(NonNegativeFloat::from(101.2), NonNegativeFloat::from(0.15), NonNegativeFloat::from(0.03));
-        let monte_carlo_prediction = monte_carlo_vanilla_pricer(&ec, stock, 0.07, NonNegativeFloat::from(0.0), None, 10000000);
-        let bs_formula = european_call_option_price(stock,NonNegativeFloat::from(123.0), 0.07,NonNegativeFloat::from(1.43));
-        assert!((f64::from(bs_formula) - f64::from(monte_carlo_prediction)).abs()<0.1);
+    fn vanilla_put_test3() {
+        let stock = GeometricBrownianMotionStock::new(NonNegativeFloat::from(3.2), TimeStamp::from(0.0), 
+            1.0, NonNegativeFloat::from(0.2), NonNegativeFloat::from(0.04));
+        let params = Box::new(vec![10.0]);
+        fn payoff(spot: NonNegativeFloat, params: &Box<Vec<f64>>)->f64{
+            f64::max(params[0]-f64::from(spot), 0.0)
+        }
+
+        let opt = VanillaStockOption::new(&Rc::new(stock), TimeStamp::from(3.7), Box::new(payoff), params);
+        assert!(f64::abs(monte_carlo_pricer(&opt, 0.05, None, 100000)-5.55)<0.01)
+        
     }
 
+    #[test]
+    fn asian_call_test1(){
+        let stock=GeometricBrownianMotionStock::new(NonNegativeFloat::from(10.2), TimeStamp::from(0.0), 
+        1.0, NonNegativeFloat::from(0.2), NonNegativeFloat::from(0.0));
+        fn average(states: &Vec<StockState>,monitoring_times: &Vec<TimeStamp>)->NonNegativeFloat{
+            let mut sum=0.0;
+            let mut j=0;
+            for t in monitoring_times.iter(){
+                while j< states.len() && states[j].get_time()<*t{
+                    j+=1;
+                }
+                if states[j].get_time()==*t{
+                    sum+=f64::from(states[j].get_value());
+                }
+                else {
+                    let a=(f64::from(states[j].get_time())-f64::from(*t))/(f64::from(states[j].get_time())-f64::from(states[j-1].get_time()));
+                    sum+=a*f64::from(states[j-1].get_value())+(1.0-a)*f64::from(states[j].get_value());
+                }
+            }
+            NonNegativeFloat::from(sum/monitoring_times.len() as f64)
+        }
+
+
+        fn payoff(average: NonNegativeFloat, params: &Box<Vec<f64>>)->f64{
+            f64::max(f64::from(average)-params[0], 0.0)
+        }
+        let monitoring_times = vec![TimeStamp::from(0.0), TimeStamp::from(1.0), 
+            TimeStamp::from(2.0), TimeStamp::from(3.0), TimeStamp::from(4.0), TimeStamp::from(5.0)];
+        let op = AsianOption::new(&Rc::new(stock), TimeStamp::from(5.0), &monitoring_times, Box::new(average), 
+            Box::new(payoff), Box::new(vec![5.4 as f64]));
+        assert!(f64::abs(monte_carlo_pricer(&op, 0.03, None, 300000)-4.83)<0.01)
+    }
+
+    #[test]
+    fn asian_put_test1(){
+        let stock=GeometricBrownianMotionStock::new(NonNegativeFloat::from(10.2), TimeStamp::from(0.0), 
+        1.0, NonNegativeFloat::from(0.2), NonNegativeFloat::from(0.0));
+        fn average(states: &Vec<StockState>,monitoring_times: &Vec<TimeStamp>)->NonNegativeFloat{
+            let mut sum=0.0;
+            let mut j=0;
+            for t in monitoring_times.iter(){
+                while j< states.len() && states[j].get_time()<*t{
+                    j+=1;
+                }
+                if states[j].get_time()==*t{
+                    sum+=f64::from(states[j].get_value());
+                }
+                else {
+                    let a=(f64::from(states[j].get_time())-f64::from(*t))/(f64::from(states[j].get_time())-f64::from(states[j-1].get_time()));
+                    sum+=a*f64::from(states[j-1].get_value())+(1.0-a)*f64::from(states[j].get_value());
+                }
+            }
+            NonNegativeFloat::from(sum/monitoring_times.len() as f64)
+        }
+
+
+        fn payoff(average: NonNegativeFloat, params: &Box<Vec<f64>>)->f64{
+            f64::max(params[0]-f64::from(average), 0.0)
+        }
+        let monitoring_times = vec![TimeStamp::from(0.0), TimeStamp::from(1.0), 
+            TimeStamp::from(2.0), TimeStamp::from(3.0), TimeStamp::from(4.0), TimeStamp::from(5.0)];
+        let op = AsianOption::new(&Rc::new(stock), TimeStamp::from(5.0), &monitoring_times, Box::new(average), 
+            Box::new(payoff), Box::new(vec![12.6 as f64]));
+        assert!(f64::abs(monte_carlo_pricer(&op, 0.03, None, 300000)-1.86)<0.01)
+    }
 }
